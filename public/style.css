@@ -146,3 +146,9 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .results .meta { color: var(--muted); font-size: .85rem; margin-bottom: 8px; }
 .results audio { width: 100%; }
 .results a { color: var(--accent); font-size: .9rem; }
+.results .file { margin-top: 8px; }
+.results .file__label { font-size: .85rem; font-weight: 600; margin-bottom: 2px; }
+.entry-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+button.danger { color: var(--err); border-color: var(--err); }
+.record { align-items: center; flex-wrap: wrap; }
+.record .hint { margin: 0; }

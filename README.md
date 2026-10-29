@@ -55,11 +55,32 @@ Le serveur sert le site et relaie `/comfy/*` (HTTP + WebSocket) vers ComfyUI : i
 4. **Langue** : celle des paroles (`fr`, `en`, …).
 5. **Durée, BPM, mesure, tonalité** : guident la structure musicale.
 6. **Seed** : même seed + mêmes réglages = même morceau. 🎲 pour en tirer un au hasard.
-7. **Générer** : le MP3 est copié dans le dossier `output/` du projet (nommé `AAAA-MM-JJ_HH-MM-SS_MusiqueGenerator_xxxxx.mp3`) et apparaît dans « Morceaux générés ». ComfyUI en garde aussi une copie dans `ComfyUI/output/audio/`.
+7. **Versions** : 1 à 4 versions générées d'un coup (seeds consécutives) pour garder la meilleure. « Arrêter » retire aussi les versions pas encore commencées.
+8. **Générer** : le MP3 est copié dans le dossier `output/` du projet (nommé `AAAA-MM-JJ_HH-MM-SS_MusiqueGenerator_xxxxx.mp3`) et apparaît dans l'**Historique**. ComfyUI en garde aussi une copie dans `ComfyUI/output/audio/`.
+
+### Historique
+
+Chaque génération est enregistrée avec ses réglages dans `output/history.json` : la liste survit au rechargement de la page, avec « Réutiliser ces réglages » et « Supprimer » (efface aussi les fichiers). Les anciens MP3 de `output/` apparaissent aussi, sans réglages.
+
+### Mixage
+
+- **Graves / Médiums / Aigus** : égaliseur 3 bandes (nœud natif) appliqué au morceau final.
+- **Volume voix** : sépare la voix pour la monter ou la baisser par rapport à l'instrumental (aussi avec une voix clonée).
+- **Enregistrer aussi la voix seule et l'instrumental** : deux MP3 de plus (`…_voix_…`, `…_instrumental_…`).
+
+Ces deux dernières options demandent le custom node `audio-separation-nodes-comfyui`.
+
+### Séparer un morceau
+
+La carte « Séparer un morceau » extrait la voix seule et l'instrumental de n'importe quelle chanson importée (sans génération). Demande `audio-separation-nodes-comfyui`.
+
+### Types de voix
+
+Le menu **Type de voix** propose des voix de base (femme douce / pop / puissante, homme grave / ténor / rauque, rap, chuchotée, duo, chœur). Ce sont des tags ACE-Step : ils remplacent les tags de voix du style (`female vocals`…) au moment de générer, sans extrait ni custom node. Combinable avec une voix clonée, qui se cale mieux sur une voix de départ proche (même genre, même tessiture).
 
 ### Voix clonée
 
-Dans le bloc **Voix**, « Ajouter une voix » : un nom + un extrait de **5 à 25 s de voix seule** (sans musique, peu de réverbération). La voix est enregistrée dans `voices/` du projet et réutilisable.
+Dans le bloc **Voix**, « Ajouter une voix » : un nom + un extrait de **5 à 25 s de voix seule** (sans musique, peu de réverbération), enregistré directement au micro (🎙️, compte à rebours de 3 s, arrêt automatique à 25 s, réécoute avant de valider) ou importé. La voix est enregistrée dans `voices/` du projet et réutilisable.
 En la sélectionnant, le morceau est généré normalement, puis la voix est séparée de l'instrumental (Demucs), convertie avec le timbre de l'extrait (Seed-VC) et remixée sur l'instrumental.
 Réglages : transposition (demi-tons, utile pour passer d'une voix d'homme à une voix de femme), étapes Seed-VC (30 par défaut), ajustement automatique de la hauteur.
 Le morceau doit contenir du chant : décrivez une voix proche dans les tags (`female vocals`, …) pour un meilleur résultat.
@@ -68,6 +89,7 @@ Le morceau doit contenir du chant : décrivez une voix proche dans les tags (`fe
 
 Cochez « Partir d'un morceau existant » et choisissez un fichier audio : ACE-Step régénère un titre qui suit sa structure, sa mélodie et son instrumental, avec vos tags et paroles (nœud natif `ReferenceTimbreAudio`).
 - « Durée = celle du morceau » recopie sa durée (max 600 s) ; sinon le morceau est coupé à la durée choisie.
+- Le **BPM** du morceau est détecté et reporté automatiquement (nœud `AudioGetTempo` d'`audio-separation-nodes-comfyui`). La détection peut donner la moitié ou le double du tempo réel : vérifiez à l'oreille.
 - **Fidélité** : 0 = reprise libre ; en l'augmentant, la génération part du morceau original bruité et lui reste plus proche.
 - Les codes audio LLM sont automatiquement désactivés en mode reprise.
 - Combinable avec une voix clonée.
@@ -79,7 +101,7 @@ Décocher « Codes audio LLM » accélère la génération au prix de la qualit�
 
 ```
 server.js           serveur statique + proxy ComfyUI + copie des morceaux dans output/ + API des voix
-output/             morceaux générés (créé automatiquement)
+output/             morceaux générés + history.json (créé automatiquement)
 voices/             voix enregistrées + voices.json (créé automatiquement)
 public/index.html   page
 public/app.js       logique (envoi du prompt, progression WebSocket, résultats)

@@ -135,3 +135,18 @@ just groove…`,
     },
   },
 ];
+
+// Types de voix de base : des tags ACE-Step, sans extrait audio ni custom node.
+// Ils remplacent les tags de voix déjà présents dans le style.
+export const BASIC_VOICES = [
+  { id: 'female-soft', name: 'Femme — douce', tags: 'female vocals, soft, breathy, intimate' },
+  { id: 'female-pop', name: 'Femme — pop claire', tags: 'female vocals, bright, clear, pop' },
+  { id: 'female-power', name: 'Femme — puissante', tags: 'female vocals, powerful, belting, soulful' },
+  { id: 'male-deep', name: 'Homme — grave', tags: 'male vocals, deep baritone, warm' },
+  { id: 'male-tenor', name: 'Homme — ténor', tags: 'male vocals, tenor, clear, emotional' },
+  { id: 'male-raspy', name: 'Homme — rauque', tags: 'male vocals, raspy, gritty' },
+  { id: 'rap', name: 'Rap', tags: 'male rap vocals, rhythmic flow, confident delivery' },
+  { id: 'whisper', name: 'Chuchotée', tags: 'whispered vocals, airy, intimate' },
+  { id: 'duet', name: 'Duo homme / femme', tags: 'male and female duet vocals, harmonies' },
+  { id: 'choir', name: 'Chœur', tags: 'choir vocals, layered harmonies, epic' },
+];

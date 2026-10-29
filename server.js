@@ -11,12 +11,13 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const OUTPUT_DIR = path.join(__dirname, 'output');
 const VOICES_DIR = path.join(__dirname, 'voices');
 const VOICES_INDEX = path.join(VOICES_DIR, 'voices.json');
+const HISTORY_FILE = path.join(OUTPUT_DIR, 'history.json');
 const PREFIX = '/comfy';
 const OUTPUT_PREFIX = '/output/';
 const VOICES_PREFIX = '/voices/';
 const COMFY_SUBFOLDER = 'musiquegenerator';
 const MAX_VOICE_BYTES = 20 * 1024 * 1024;
-const AUDIO_EXTS = ['.mp3', '.wav', '.flac', '.ogg', '.m4a'];
+const AUDIO_EXTS = ['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.webm'];
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -30,6 +31,7 @@ const MIME = {
   '.wav': 'audio/wav',
   '.ogg': 'audio/ogg',
   '.m4a': 'audio/mp4',
+  '.webm': 'audio/webm',
 };
 
 function comfyPath(url) {
@@ -208,6 +210,97 @@ function routeVoices(req, res) {
   sendJson(res, 404, { error: 'Route inconnue' });
 }
 
+// ---------- Historique (output/history.json) ----------
+// Entrée : { id, createdAt, kind: 'generation' | 'separation', params, seconds, files: [{ kind, filename }] }.
+
+async function readHistory() {
+  try {
+    return JSON.parse(await fs.promises.readFile(HISTORY_FILE, 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+// Les écritures sont sérialisées pour ne pas perdre d'entrée si deux requêtes arrivent ensemble.
+let historyLock = Promise.resolve();
+function updateHistory(change) {
+  const run = historyLock.then(async () => {
+    const next = change(await readHistory());
+    await fs.promises.mkdir(OUTPUT_DIR, { recursive: true });
+    await fs.promises.writeFile(HISTORY_FILE, JSON.stringify(next, null, 2));
+  });
+  historyLock = run.catch(() => {});
+  return run;
+}
+
+function fileView(f) {
+  return { ...f, url: OUTPUT_PREFIX + encodeURIComponent(f.filename) };
+}
+
+// Historique + anciens MP3 de output/ qui n'y figurent pas (générés avant l'historique).
+async function listHistory(req, res) {
+  const history = await readHistory();
+  const known = new Set(history.flatMap((e) => e.files.map((f) => f.filename)));
+  let names = [];
+  try {
+    names = await fs.promises.readdir(OUTPUT_DIR);
+  } catch {}
+  const orphans = await Promise.all(names
+    .filter((n) => AUDIO_EXTS.includes(path.extname(n).toLowerCase()) && !known.has(n))
+    .map(async (n) => ({
+      id: `file:${n}`,
+      createdAt: (await fs.promises.stat(path.join(OUTPUT_DIR, n))).mtime.toISOString(),
+      kind: 'generation',
+      params: null,
+      files: [{ kind: 'mix', filename: n }],
+    })));
+  const entries = [...history, ...orphans]
+    .map((e) => ({ ...e, files: e.files.map(fileView) }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  sendJson(res, 200, entries);
+}
+
+async function addHistory(req, res) {
+  try {
+    const { kind = 'generation', params = null, seconds = null, files } = JSON.parse(await readBody(req));
+    if (!Array.isArray(files) || !files.length) return sendJson(res, 400, { error: 'files manquant' });
+    const entry = {
+      id: crypto.randomUUID().slice(0, 8),
+      createdAt: new Date().toISOString(),
+      kind,
+      params,
+      seconds,
+      files: files.map((f) => ({ kind: String(f.kind), filename: path.basename(String(f.filename)) })),
+    };
+    await updateHistory((h) => [...h, entry]);
+    sendJson(res, 200, { ...entry, files: entry.files.map(fileView) });
+  } catch (err) {
+    sendJson(res, 400, { error: `Historique : ${err.message}` });
+  }
+}
+
+// Supprime l'entrée et ses fichiers.
+async function deleteHistory(req, res, id) {
+  let files;
+  if (id.startsWith('file:')) {
+    files = [{ filename: path.basename(id.slice(5)) }];
+  } else {
+    files = (await readHistory()).find((e) => e.id === id)?.files;
+    if (!files) return sendJson(res, 404, { error: 'Entrée introuvable' });
+    await updateHistory((h) => h.filter((e) => e.id !== id));
+  }
+  await Promise.all(files.map((f) => fs.promises.rm(path.join(OUTPUT_DIR, path.basename(f.filename)), { force: true })));
+  sendJson(res, 200, { ok: true });
+}
+
+function routeHistory(req, res) {
+  const id = decodeURIComponent(req.url.split('?')[0].split('/')[3] || ''); // /api/history/<id>
+  if (!id && req.method === 'GET') return listHistory(req, res);
+  if (!id && req.method === 'POST') return addHistory(req, res);
+  if (id && req.method === 'DELETE') return deleteHistory(req, res, id);
+  sendJson(res, 404, { error: 'Route inconnue' });
+}
+
 function serveStatic(req, res) {
   const urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   const prefix = [OUTPUT_PREFIX, VOICES_PREFIX].find((p) => urlPath.startsWith(p));
@@ -233,6 +326,8 @@ const server = http.createServer((req, res) => {
     proxyHttp(req, res);
   } else if (req.method === 'POST' && req.url === '/api/save') {
     saveOutput(req, res);
+  } else if (req.url === '/api/history' || req.url.startsWith('/api/history/')) {
+    routeHistory(req, res);
   } else if (req.url === '/api/voices' || req.url.startsWith('/api/voices/')) {
     routeVoices(req, res);
   } else {
