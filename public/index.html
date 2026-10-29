@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Musique Generator</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Musique Generator</h1>
+      <p class="sub">ComfyUI · ACE-Step 1.5 Turbo AIO</p>
+    </div>
+    <div id="status" class="status status--pending">Connexion à ComfyUI…</div>
+  </header>
+
+  <main>
+    <section class="card guide">
+      <h2>Comment ça marche ?</h2>
+      <ol>
+        <li><strong>Choisissez un exemple</strong> ci-dessous pour remplir le formulaire, puis modifiez-le.</li>
+        <li><strong>Style</strong> : décrivez le genre, les instruments, la voix, l'ambiance (en anglais de préférence), séparés par des virgules.</li>
+        <li><strong>Paroles</strong> : structurez avec des balises <code>[Verse]</code>, <code>[Chorus]</code>, <code>[Bridge]</code>, <code>[Outro]</code>… Pour un morceau sans voix, écrivez <code>[Instrumental]</code>.</li>
+        <li><strong>Langue</strong> : celle des paroles (<code>fr</code> pour le français).</li>
+        <li>Cliquez sur <strong>Générer</strong>. Même seed + mêmes réglages = même résultat.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <div class="presets">
+        <label for="preset">Exemple</label>
+        <div class="row">
+          <select id="preset"></select>
+          <button type="button" id="loadPreset" class="secondary">Charger l'exemple</button>
+        </div>
+        <p id="presetHint" class="hint"></p>
+      </div>
+
+      <form id="form">
+        <label for="tags">Style / tags</label>
+        <textarea id="tags" rows="3" required placeholder="ex : synthwave, retro 80s, male vocals, driving bass, nostalgic"></textarea>
+
+        <label for="lyrics">Paroles</label>
+        <textarea id="lyrics" rows="12" placeholder="[Verse]&#10;…&#10;&#10;[Chorus]&#10;…&#10;&#10;ou [Instrumental]"></textarea>
+
+        <div class="grid">
+          <div>
+            <label for="duration">Durée (s)</label>
+            <input id="duration" type="number" min="10" max="600" step="1" value="60">
+          </div>
+          <div>
+            <label for="bpm">BPM</label>
+            <input id="bpm" type="number" min="10" max="300" step="1" value="120">
+          </div>
+          <div>
+            <label for="timesignature">Mesure</label>
+            <select id="timesignature">
+              <option value="2">2/4</option>
+              <option value="3">3/4</option>
+              <option value="4" selected>4/4</option>
+              <option value="6">6/8</option>
+            </select>
+          </div>
+          <div>
+            <label for="keyscale">Tonalité</label>
+            <select id="keyscale"></select>
+          </div>
+          <div>
+            <label for="language">Langue</label>
+            <select id="language"></select>
+          </div>
+          <div>
+            <label for="seed">Seed</label>
+            <div class="row">
+              <input id="seed" type="number" min="0" step="1" value="0">
+              <button type="button" id="randomSeed" class="secondary icon" title="Seed aléatoire">🎲</button>
+            </div>
+          </div>
+        </div>
+
+        <fieldset id="voiceBlock">
+          <legend>Voix</legend>
+          <p id="voiceMissing" class="hint warn" hidden>
+            Voix clonée indisponible : installez les custom nodes <code>audio-separation-nodes-comfyui</code> et
+            <code>ComfyUI_Seed-VC</code> (+ leurs modèles, voir README), puis relancez ComfyUI et rechargez la page.
+          </p>
+          <label for="voice">Voix chantée</label>
+          <div class="row">
+            <select id="voice"></select>
+            <button type="button" id="deleteVoice" class="secondary" hidden>Supprimer</button>
+          </div>
+          <audio id="voicePreview" controls hidden></audio>
+          <div id="voiceOptions" class="grid" hidden>
+            <div>
+              <label for="voice_pitch">Transposition (demi-tons)</label>
+              <input id="voice_pitch" type="number" min="-24" max="24" step="1" value="0">
+            </div>
+            <div>
+              <label for="voice_steps">Étapes Seed-VC</label>
+              <input id="voice_steps" type="number" min="1" max="200" step="1" value="30">
+            </div>
+            <div class="check">
+              <label><input id="voice_auto_f0" type="checkbox" checked> Ajuster automatiquement la hauteur à la voix</label>
+            </div>
+          </div>
+          <details id="addVoiceBox">
+            <summary>Ajouter une voix</summary>
+            <p class="hint">Extrait de 5 à 25 s, voix seule (sans musique), peu de réverbération. Formats : mp3, wav, flac, ogg, m4a.</p>
+            <div class="grid">
+              <div>
+                <label for="newVoiceName">Nom</label>
+                <input id="newVoiceName" type="text" placeholder="ex : Léa">
+              </div>
+              <div>
+                <label for="newVoiceFile">Extrait</label>
+                <input id="newVoiceFile" type="file" accept="audio/*">
+              </div>
+            </div>
+            <div class="actions">
+              <button type="button" id="addVoice" class="secondary">Enregistrer la voix</button>
+            </div>
+          </details>
+        </fieldset>
+
+        <fieldset>
+          <legend>Reprise d'un morceau</legend>
+          <div class="check">
+            <label><input id="cover_enabled" type="checkbox"> Partir d'un morceau existant (cover)</label>
+          </div>
+          <div id="coverOptions" hidden>
+            <p class="hint">Le morceau généré suivra la structure, la mélodie et l'instrumental du morceau importé, avec vos tags et paroles.</p>
+            <label for="coverFile">Morceau</label>
+            <input id="coverFile" type="file" accept="audio/*">
+            <audio id="coverPreview" controls hidden></audio>
+            <div class="check">
+              <label><input id="cover_use_duration" type="checkbox" checked> Durée = celle du morceau</label>
+            </div>
+            <label for="cover_fidelity">Fidélité à l'original : <span id="coverFidelityValue">0</span></label>
+            <input id="cover_fidelity" type="range" min="0" max="0.9" step="0.05" value="0">
+            <p class="hint">0 = reprise libre ; plus haut = plus proche de l'original (et moins de vos paroles).</p>
+          </div>
+        </fieldset>
+
+        <details>
+          <summary>Réglages avancés</summary>
+          <div class="grid">
+            <div>
+              <label for="steps">Étapes (turbo : 8)</label>
+              <input id="steps" type="number" min="1" max="100" step="1" value="8">
+            </div>
+            <div>
+              <label for="shift">Shift</label>
+              <input id="shift" type="number" min="0" max="100" step="0.1" value="3">
+            </div>
+            <div>
+              <label for="cfg_scale">CFG LLM</label>
+              <input id="cfg_scale" type="number" min="0" max="100" step="0.1" value="2">
+            </div>
+            <div>
+              <label for="temperature">Température</label>
+              <input id="temperature" type="number" min="0" max="2" step="0.01" value="0.85">
+            </div>
+            <div>
+              <label for="top_p">Top P</label>
+              <input id="top_p" type="number" min="0" max="1" step="0.01" value="0.9">
+            </div>
+            <div class="check">
+              <label><input id="generate_audio_codes" type="checkbox" checked> Codes audio LLM (meilleure qualité, plus lent)</label>
+            </div>
+          </div>
+        </details>
+
+        <div class="actions">
+          <button type="submit" id="generate">Générer</button>
+          <button type="button" id="interrupt" class="secondary" hidden>Arrêter</button>
+        </div>
+      </form>
+
+      <div id="progress" class="progress" hidden>
+        <div class="progress__label" id="progressLabel">En attente…</div>
+        <div class="progress__bar"><div id="progressFill"></div></div>
+      </div>
+      <div id="error" class="error" hidden></div>
+    </section>
+
+    <section class="card">
+      <h2>Morceaux générés</h2>
+      <p id="emptyResults" class="hint">Aucun morceau pour l'instant.</p>
+      <ul id="results" class="results"></ul>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
