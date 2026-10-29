@@ -1,6 +1,6 @@
 import {
   buildSeparationWorkflow, buildTempoWorkflow, buildWorkflow, CHECKPOINT, DEFAULTS, NODE_LABELS,
-  REQUIRED_VOICE_NODES, SAVE_NODES, SEPARATION_NODE, TEMPO_NODE, TEMPO_RESULT_NODE,
+  REQUIRED_VOICE_NODES, SAVE_NODES, SEPARATION_NODE, TEMPO_NODE, TEMPO_RESULT_NODE, VOICE_QUALITY_TAGS,
 } from './workflow.js';
 import { BASIC_VOICES, PRESETS } from './presets.js';
 
@@ -263,7 +263,7 @@ function selectedBasicVoice() {
 function updateBasicVoiceHint() {
   const basic = selectedBasicVoice();
   $('basicVoiceHint').textContent = basic
-    ? `Ajoute « ${basic.tags} » au style (en remplaçant ses tags de voix).`
+    ? `Ajoute « ${basic.tags}, ${VOICE_QUALITY_TAGS} » au style (en remplaçant ses tags de voix).`
     : 'La voix suit les tags du style.';
 }
 
@@ -363,8 +363,9 @@ async function startRecording() {
   }
   let stream;
   try {
+    // Aucun traitement du navigateur : la réduction de bruit rend la voix métallique et Seed-VC copie ce défaut.
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true },
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
     });
   } catch (err) {
     showError(`Micro inaccessible : ${err.message}`);
@@ -372,7 +373,7 @@ async function startRecording() {
   }
   showError('');
   const [mimeType, ext] = RECORD_TYPES.find(([t]) => MediaRecorder.isTypeSupported(t)) ?? ['', 'webm'];
-  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  const recorder = new MediaRecorder(stream, { ...(mimeType && { mimeType }), audioBitsPerSecond: 256000 });
   const chunks = [];
   recorder.addEventListener('dataavailable', (e) => chunks.push(e.data));
   recorder.addEventListener('stop', () => {

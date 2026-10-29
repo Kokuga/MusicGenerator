@@ -82,7 +82,14 @@ Le menu **Type de voix** propose des voix de base (femme douce / pop / puissante
 
 Dans le bloc **Voix**, « Ajouter une voix » : un nom + un extrait de **5 à 25 s de voix seule** (sans musique, peu de réverbération), enregistré directement au micro (🎙️, compte à rebours de 3 s, arrêt automatique à 25 s, réécoute avant de valider) ou importé. La voix est enregistrée dans `voices/` du projet et réutilisable.
 En la sélectionnant, le morceau est généré normalement, puis la voix est séparée de l'instrumental (Demucs), convertie avec le timbre de l'extrait (Seed-VC) et remixée sur l'instrumental.
-Réglages : transposition (demi-tons, utile pour passer d'une voix d'homme à une voix de femme), étapes Seed-VC (30 par défaut), ajustement automatique de la hauteur.
+Réglages : transposition (demi-tons, utile pour passer d'une voix d'homme à une voix de femme), étapes Seed-VC (50 par défaut, 30–50 recommandé pour le chant), ajustement automatique de la hauteur (décoché par défaut : la doc Seed-VC le déconseille pour le chant, il rend la voix robotique).
+
+**Pour une voix naturelle (moins métallique) :**
+- **chantez** l'extrait (15–25 s), dans une pièce calme, près du micro ; évitez les enregistreurs en ligne et les fichiers très compressés. L'enregistreur du site désactive la réduction de bruit du navigateur, qui rend la voix métallique ;
+- choisissez un **Type de voix** proche de la vôtre (même genre) et gardez la transposition à 0 : moins Seed-VC transforme, moins il y a d'artefacts ;
+- baissez un peu la voix dans **Mixage** (−2 à −3 dB) pour masquer les résidus de la séparation.
+
+Les types de voix ajoutent aussi `natural human vocals, studio quality recording` au style.
 Le morceau doit contenir du chant : décrivez une voix proche dans les tags (`female vocals`, …) pour un meilleur résultat.
 
 ### Reprise d'un morceau

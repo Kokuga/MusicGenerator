@@ -57,12 +57,14 @@ function saveMp3(audio, suffix = '') {
   };
 }
 
-const VOICE_TAG = /\b(vocals?|voices?|singers?|singing|rap|rapper|duet|a cappella)\b/i;
+const VOICE_TAG = /\b(vocals?|voices?|singers?|singing|rap|rapper|duet|a cappella|autotune|auto-tune)\b/i;
+// Ajoutés à tout type de voix pour pousser ACE-Step vers un chant moins synthétique.
+export const VOICE_QUALITY_TAGS = 'natural human vocals, studio quality recording';
 
 // Retire les tags de voix du style (séparés par des virgules) et ajoute ceux du type choisi.
 export function applyVoiceTags(tags, voiceTags) {
   const kept = tags.split(',').map((t) => t.trim()).filter((t) => t && !VOICE_TAG.test(t));
-  return [...kept, voiceTags].join(', ');
+  return [...kept, voiceTags, VOICE_QUALITY_TAGS].join(', ');
 }
 
 export function buildWorkflow(input) {

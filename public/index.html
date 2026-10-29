@@ -109,16 +109,20 @@
               <input id="voice_pitch" type="number" min="-24" max="24" step="1" value="0">
             </div>
             <div>
-              <label for="voice_steps">Étapes Seed-VC</label>
-              <input id="voice_steps" type="number" min="1" max="200" step="1" value="30">
+              <label for="voice_steps">Étapes Seed-VC (30–50)</label>
+              <input id="voice_steps" type="number" min="1" max="200" step="1" value="50">
             </div>
             <div class="check">
-              <label><input id="voice_auto_f0" type="checkbox" checked> Ajuster automatiquement la hauteur à la voix</label>
+              <label><input id="voice_auto_f0" type="checkbox"> Ajuster automatiquement la hauteur à la voix</label>
+              <p class="hint">À laisser décoché pour le chant (sinon voix robotique / fausse) : utilisez plutôt la transposition. Pour un rendu naturel, choisissez un type de voix proche de la vôtre (même genre) avec une transposition à 0.</p>
             </div>
           </div>
           <details id="addVoiceBox">
             <summary>Ajouter une voix</summary>
-            <p class="hint">Extrait de 5 à 25 s, voix seule (sans musique), peu de réverbération. Chantez si possible.</p>
+            <p class="hint">
+              Pour une voix naturelle : <strong>chantez</strong> 15 à 25 s (plutôt que parler), dans une pièce calme et peu résonante,
+              à 15–20 cm du micro, sans musique derrière. Évitez les enregistreurs en ligne et les fichiers très compressés.
+            </p>
             <label for="newVoiceName">Nom</label>
             <input id="newVoiceName" type="text" placeholder="ex : Léa">
             <label>Extrait</label>
