@@ -19,8 +19,8 @@ Interface web pour générer de la musique avec **ComfyUI** et le modèle **ACE-
    ```
    puis installez leurs dépendances avec le Python de ComfyUI (version portable) :
    ```bash
-   python_embededpython.exe -m pip install -r ComfyUIcustom_nodesaudio-separation-nodes-comfyuiequirements.txt
-   python_embededpython.exe -m pip install -r ComfyUIcustom_nodesComfyUI_Seed-VCequirements.txt
+   python_embeded\python.exe -m pip install -r ComfyUI\custom_nodes\audio-separation-nodes-comfyui\requirements.txt
+   python_embeded\python.exe -m pip install -r ComfyUI\custom_nodes\ComfyUI_Seed-VC\requirements.txt
    ```
    (ou via ComfyUI Manager).
 2. Téléchargez les modèles Seed-VC **à la main** (le node ne les télécharge pas) :
@@ -94,4 +94,8 @@ public/style.css    styles
 - **« Modèle introuvable »** : vérifiez le nom et l'emplacement du checkpoint.
 - **Bloc Voix grisé** : custom nodes absents ou en erreur au démarrage de ComfyUI (regardez sa console).
 - **Erreur `SeedVCRun` / fichier introuvable** : un modèle Seed-VC manque dans `ComfyUI/models/TTS/`.
+- **`SeedVCRun` incompatible avec un ComfyUI récent** (à réappliquer après une mise à jour du node, dossier `custom_nodes/seed-vc-mw/`), puis relancer ComfyUI :
+  - `BigVGAN._from_pretrained() missing ... 'proxies' and 'resume_download'` : dans `seed_vc/modules/bigvgan/bigvgan.py`, donner des valeurs par défaut : `proxies: Optional[Dict] = None,` et `resume_download: bool = False,`.
+  - `TorchCodec is required for save_with_torchcodec` : dans `seedvcnode.py` (`cache_audio_tensor`), remplacer `torchaudio.save(temp_filepath, audio_tensor, sample_rate)` par
+    `import soundfile` puis `soundfile.write(temp_filepath, audio_tensor.detach().float().cpu().numpy().T, sample_rate)`.
 - **`extends past the end of the file` / `corrupt/incomplete`** : le téléchargement du checkpoint est incomplet ; retéléchargez-le (le fichier doit faire ~9,34 Go).
