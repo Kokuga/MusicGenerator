@@ -1,8 +1,10 @@
 import {
-  buildSeparationWorkflow, buildTempoWorkflow, buildWorkflow, CHECKPOINT, DEFAULTS, NODE_LABELS,
+  buildRevoiceWorkflow, buildSeparationWorkflow, buildTempoWorkflow, buildWorkflow, CHECKPOINT, DEFAULTS, NODE_LABELS,
   REQUIRED_VOICE_NODES, SAVE_NODES, SEPARATION_NODE, TEMPO_NODE, TEMPO_RESULT_NODE, VOICE_QUALITY_TAGS,
 } from './workflow.js';
-import { BASIC_VOICES, PRESETS } from './presets.js';
+import { BASIC_VOICES, PRESETS, randomStyle } from './presets.js';
+import { chime, decodeAudio, drawWaveform, encodeWav, peaksFor, renderEdit } from './audio-tools.js';
+import { analyzeLyrics, insertTag, SECTION_TAGS } from './lyrics.js';
 
 const API = '/comfy';
 const ENCODER_NODE = 'TextEncodeAceStepAudio1.5';
@@ -26,6 +28,7 @@ let separationReady = false;
 let tempoReady = false;
 let recordedVoice = null; // File issu du micro, prioritaire sur le fichier importé
 let recording = null; // { recorder, stream, timer }
+let userPresets = []; // presets enregistrés dans data/presets.json
 const uploads = new WeakMap(); // File → nom dans ComfyUI/input (évite les envois répétés)
 const activePrompts = new Map(); // prompt_id → (label, ratio) => void
 const pendingPrompts = new Set(); // prompts de la génération en cours, pour « Arrêter »
@@ -427,6 +430,7 @@ function syncCoverDuration() {
   const seconds = $('coverPreview').duration;
   if ($('cover_use_duration').checked && Number.isFinite(seconds)) {
     $('duration').value = Math.min(MAX_DURATION, Math.round(seconds));
+    updateLyricsStats();
   }
 }
 
@@ -443,6 +447,7 @@ async function detectCoverBpm(file) {
     if ($('coverFile').files[0] !== file) return; // un autre fichier a été choisi entre-temps
     if (!(bpm >= 10 && bpm <= 300)) throw new Error('tempo non reconnu');
     $('bpm').value = bpm;
+    updateLyricsStats();
     hint.textContent = `BPM détecté : ${bpm} (reporté dans le champ BPM).`;
   } catch (err) {
     hint.textContent = `BPM non détecté (${err.message}) : réglez-le à la main.`;
@@ -468,18 +473,116 @@ function initCover() {
   });
 }
 
+// ---------- Exemples et presets personnels ----------
+
+const USER_PREFIX = 'user:';
+
+function currentPreset() {
+  const value = $('preset').value;
+  if (value.startsWith(USER_PREFIX)) {
+    const preset = userPresets.find((p) => USER_PREFIX + p.id === value);
+    return preset && {
+      ...preset,
+      user: true,
+      hint: `Vos réglages, enregistrés le ${new Date(preset.createdAt).toLocaleDateString('fr-FR')}.`,
+    };
+  }
+  return PRESETS.find((p) => p.id === value);
+}
+
+function updatePresetUi() {
+  const preset = currentPreset();
+  $('presetHint').textContent = preset?.hint ?? '';
+  $('deletePreset').hidden = !preset?.user;
+}
+
+function renderPresetSelect(selected = $('preset').value) {
+  const examples = document.createElement('optgroup');
+  examples.label = 'Exemples';
+  examples.append(...PRESETS.map((p) => new Option(p.name, p.id)));
+  const mine = document.createElement('optgroup');
+  mine.label = 'Mes presets';
+  if (userPresets.length) {
+    mine.append(...userPresets.map((p) => new Option(p.name, USER_PREFIX + p.id)));
+  } else {
+    mine.append(Object.assign(new Option('(aucun : 💾 pour enregistrer vos réglages)', ''), { disabled: true }));
+  }
+  $('preset').replaceChildren(examples, mine);
+  if (selected && [...$('preset').options].some((o) => o.value === selected && !o.disabled)) $('preset').value = selected;
+  updatePresetUi();
+}
+
+async function loadUserPresets(selected) {
+  try {
+    userPresets = await jsonFetch('/api/presets');
+  } catch (err) {
+    showError(`Presets : ${err.message}`);
+  }
+  renderPresetSelect(selected);
+}
+
+async function savePreset() {
+  const params = readParams();
+  const name = prompt('Nom de ce preset ?', params.tags.split(',')[0].trim());
+  if (!name?.trim()) return;
+  delete params.cover; // le fichier importé ne peut pas être conservé
+  try {
+    const saved = await jsonFetch('/api/presets', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, params }),
+    });
+    await loadUserPresets(USER_PREFIX + saved.id);
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function deletePreset() {
+  const preset = currentPreset();
+  if (!preset?.user || !confirm(`Supprimer le preset « ${preset.name} » ?`)) return;
+  try {
+    await jsonFetch(`/api/presets/${preset.id}`, { method: 'DELETE' });
+  } catch (err) {
+    showError(err.message);
+  }
+  await loadUserPresets(PRESETS[0].id);
+}
+
 function initPresets() {
-  fillSelect($('preset'), [], null);
-  for (const p of PRESETS) $('preset').add(new Option(p.name, p.id));
-  const updateHint = () => {
-    $('presetHint').textContent = PRESETS.find((p) => p.id === $('preset').value)?.hint ?? '';
-  };
-  $('preset').addEventListener('change', updateHint);
+  renderPresetSelect(PRESETS[0].id);
+  $('preset').addEventListener('change', updatePresetUi);
   $('loadPreset').addEventListener('click', () => {
-    const preset = PRESETS.find((p) => p.id === $('preset').value);
+    const preset = currentPreset();
     if (preset) applyParams({ ...DEFAULTS, ...preset.params });
   });
-  updateHint();
+  $('savePreset').addEventListener('click', savePreset);
+  $('deletePreset').addEventListener('click', deletePreset);
+  loadUserPresets();
+}
+
+// ---------- Aide aux paroles et « Surprends-moi » ----------
+
+function updateLyricsStats() {
+  const duration = Number($('duration').value);
+  const a = analyzeLyrics($('lyrics').value, Number($('bpm').value), duration);
+  let text = a.lines
+    ? `${a.lines} lignes chantées · ${a.syllables} syllabes (max ${a.maxLine} par ligne) · chant ≈ ${a.singSeconds} s sur ${duration} s`
+    : 'Aucune ligne chantée : morceau instrumental.';
+  if (a.warning) text += ` — ⚠ ${a.warning}`;
+  $('lyricsStats').textContent = text;
+  $('lyricsStats').classList.toggle('warn-inline', Boolean(a.warning));
+}
+
+function initLyricsTools() {
+  $('lyricsTags').replaceChildren(...SECTION_TAGS.map((tag) => button(`[${tag}]`, () => insertTag($('lyrics'), tag))));
+  for (const id of ['lyrics', 'bpm', 'duration']) $(id).addEventListener('input', updateLyricsStats);
+  updateLyricsStats();
+}
+
+function surprise() {
+  const style = randomStyle();
+  applyParams({ ...style, seed: Math.floor(Math.random() * MAX_SEED) });
 }
 
 // ---------- Formulaire ----------
@@ -497,7 +600,7 @@ function applyParams(params) {
     }
     el.value = params[key];
   }
-  $('generate_audio_codes').checked = params.generate_audio_codes;
+  if (params.generate_audio_codes !== undefined) $('generate_audio_codes').checked = params.generate_audio_codes;
   if ('basic_voice' in params) {
     $('basic_voice').value = BASIC_VOICES.some((v) => v.id === params.basic_voice?.id) ? params.basic_voice.id : '';
     updateBasicVoiceHint();
@@ -516,9 +619,12 @@ function applyParams(params) {
     $('cover_fidelity').value = params.cover.fidelity;
     $('coverFidelityValue').textContent = params.cover.fidelity;
   }
-  const mix = { ...DEFAULTS.mix, ...params.mix };
-  for (const key of MIX_FIELDS) $(`mix_${key}`).value = mix[key];
-  $('stems').checked = Boolean(params.stems) && separationReady;
+  if ('mix' in params) {
+    const mix = { ...DEFAULTS.mix, ...params.mix };
+    for (const key of MIX_FIELDS) $(`mix_${key}`).value = mix[key];
+  }
+  if ('stems' in params) $('stems').checked = Boolean(params.stems) && separationReady;
+  updateLyricsStats();
 }
 
 function readParams() {
@@ -551,14 +657,43 @@ function readParams() {
 
 // ---------- Historique ----------
 
+function button(text, onClick, className = 'secondary') {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = className;
+  b.textContent = text;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function mixMeta(mixParams) {
+  const mix = { ...DEFAULTS.mix, ...mixParams };
+  return [
+    mix.vocal_db && `voix ${mix.vocal_db > 0 ? '+' : ''}${mix.vocal_db} dB`,
+    (mix.low_db || mix.mid_db || mix.high_db) && `EQ ${mix.low_db}/${mix.mid_db}/${mix.high_db} dB`,
+  ].filter(Boolean);
+}
+
 function describe(entry) {
   const p = entry.params;
   if (entry.kind === 'separation') {
     return { title: `Séparation de ${p?.name ?? 'un morceau'}`, meta: entry.seconds ? `traité en ${entry.seconds} s` : '' };
   }
+  if (entry.kind === 'revoice') {
+    return {
+      title: `${p.name} — ${p.voice ? `voix : ${p.voice.name}` : 'remixé'}`,
+      meta: [...mixMeta(p.mix), entry.seconds && `traité en ${entry.seconds} s`].filter(Boolean).join(' · '),
+    };
+  }
+  if (entry.kind === 'edit') {
+    const e = p.edits;
+    return {
+      title: `${p.name} (retouché)`,
+      meta: [`${e.start}–${e.end} s`, (e.fadeIn || e.fadeOut) && `fondus ${e.fadeIn} / ${e.fadeOut} s`, e.normalize && 'normalisé']
+        .filter(Boolean).join(' · '),
+    };
+  }
   if (!p) return { title: entry.files[0].filename, meta: 'réglages non enregistrés (ancien morceau)' };
-  const mix = { ...DEFAULTS.mix, ...p.mix };
-  const eq = mix.low_db || mix.mid_db || mix.high_db;
   return {
     title: p.tags.length > 90 ? `${p.tags.slice(0, 90)}…` : p.tags,
     meta: [
@@ -566,11 +701,258 @@ function describe(entry) {
       p.basic_voice && `type : ${p.basic_voice.name}`,
       p.voice && `voix : ${p.voice.name}`,
       p.cover && `reprise de ${p.cover.name}`,
-      mix.vocal_db && `voix ${mix.vocal_db > 0 ? '+' : ''}${mix.vocal_db} dB`,
-      eq && `EQ ${mix.low_db}/${mix.mid_db}/${mix.high_db} dB`,
+      ...mixMeta(p.mix),
       entry.seconds && `généré en ${entry.seconds} s`,
     ].filter(Boolean).join(' · '),
   };
+}
+
+// Ligne d'état sous une entrée (actions longues : changement de voix, retouche).
+function entryStatus(li) {
+  const el = li.querySelector('.entry-status');
+  const show = (text, error = false) => {
+    el.hidden = !text;
+    el.textContent = text;
+    el.classList.toggle('err', error);
+  };
+  return {
+    set: (text) => show(text),
+    error: (text) => show(text, true),
+    clear: () => show(''),
+  };
+}
+
+async function fileFromUrl(url, filename) {
+  const blob = await (await fetch(url)).blob();
+  return new File([blob], filename, { type: blob.type });
+}
+
+// ---------- Forme d'onde (chargée quand elle devient visible) ----------
+
+const waveformLoaders = new WeakMap();
+const waveformObserver = new IntersectionObserver((items) => {
+  for (const item of items) {
+    if (!item.isIntersecting) continue;
+    waveformObserver.unobserve(item.target);
+    waveformLoaders.get(item.target)?.();
+  }
+}, { rootMargin: '200px' });
+
+function attachWaveform(canvas, player, url) {
+  let peaks = null;
+  const redraw = () => {
+    if (peaks) drawWaveform(canvas, peaks, player.duration ? player.currentTime / player.duration : 0);
+  };
+  waveformLoaders.set(canvas, () => {
+    peaksFor(url).then((p) => {
+      peaks = p;
+      redraw();
+    }).catch(() => {
+      canvas.hidden = true;
+    });
+  });
+  waveformObserver.observe(canvas);
+  player.addEventListener('timeupdate', redraw);
+  player.addEventListener('seeked', redraw);
+  // Clic sur la forme d'onde : lecture à partir de cet endroit.
+  canvas.addEventListener('click', (ev) => {
+    const ratio = ev.offsetX / canvas.clientWidth;
+    const go = () => {
+      player.currentTime = ratio * player.duration;
+      player.play();
+    };
+    if (Number.isFinite(player.duration)) {
+      go();
+    } else {
+      player.preload = 'auto';
+      player.addEventListener('loadedmetadata', go, { once: true });
+      player.load();
+    }
+  });
+}
+
+// ---------- Actions sur un fichier ----------
+
+async function useAsCover(file) {
+  const f = await fileFromUrl(file.url, file.filename);
+  const transfer = new DataTransfer();
+  transfer.items.add(f);
+  $('coverFile').files = transfer.files;
+  $('cover_enabled').checked = true;
+  $('coverOptions').hidden = false;
+  $('coverFile').dispatchEvent(new Event('change'));
+  $('cover_enabled').closest('fieldset').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// Rechante un morceau existant avec la voix clonée sélectionnée (sans régénérer la musique).
+async function revoice(entry, file, li) {
+  const status = entryStatus(li);
+  const voice = selectedVoice();
+  if (!voiceNodesReady || !voice) {
+    status.error(voiceNodesReady
+      ? 'Choisissez d\'abord une voix clonée dans le bloc « Voix » (transposition, étapes, mixage compris), puis recliquez.'
+      : 'Voix clonée indisponible : custom nodes manquants (voir le bloc « Voix »).');
+    $('voiceBlock').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  askNotificationPermission();
+  const params = readParams();
+  const name = describe(entry).title.slice(0, 60);
+  const start = performance.now();
+  try {
+    status.set('Envoi du morceau et de la voix à ComfyUI…');
+    const audio = await uploadToComfy(await fileFromUrl(file.url, file.filename));
+    const input = { audio, voice: { ...params.voice, audio: await pushVoice(voice.id) }, mix: params.mix, stems: params.stems };
+    const id = await queuePrompt(buildRevoiceWorkflow(input),
+      (label, ratio) => status.set(ratio ? `${label} (${Math.round(ratio * 100)} %)` : label));
+    status.set("En file d'attente…");
+    const files = await saveOutputs(await waitForPrompt(id));
+    await addToHistory({
+      kind: 'revoice',
+      params: { name, voice: params.voice, mix: params.mix, stems: params.stems },
+      seconds: Math.round((performance.now() - start) / 1000),
+      files,
+    });
+    status.set('Terminé : la nouvelle version est en haut de l\'historique.');
+    notifyDone('Voix changée', `${name} — voix : ${voice.name}`);
+  } catch (err) {
+    status.error(err.message);
+    notifyDone('Changement de voix échoué', err.message);
+  }
+}
+
+function numberField(label, value, attrs = {}) {
+  const wrap = document.createElement('div');
+  const lab = document.createElement('label');
+  lab.textContent = label;
+  const input = Object.assign(document.createElement('input'), { type: 'number', value, step: '0.1', min: '0', ...attrs });
+  lab.append(input);
+  wrap.append(lab);
+  return { wrap, input };
+}
+
+// Retouche dans le navigateur : coupe, fondus, normalisation, puis écoute / export WAV / historique.
+function toggleEditor(entry, file, box, li) {
+  const existing = box.querySelector('.editor');
+  if (existing) {
+    existing.remove();
+    return;
+  }
+  const panel = document.createElement('div');
+  panel.className = 'editor';
+  panel.textContent = 'Chargement du morceau…';
+  box.append(panel);
+
+  decodeAudio(file.url).then((buffer) => {
+    const duration = Math.round(buffer.duration * 10) / 10;
+    const start = numberField('Début (s)', 0, { max: duration });
+    const end = numberField('Fin (s)', duration, { max: duration });
+    const fadeIn = numberField('Fondu entrée (s)', 0, { max: 30 });
+    const fadeOut = numberField('Fondu sortie (s)', 3, { max: 30 });
+    const normalize = Object.assign(document.createElement('input'), { type: 'checkbox', checked: true });
+    const normLabel = document.createElement('label');
+    normLabel.append(normalize, ' Normaliser le volume (pic à −1 dB)');
+    const normWrap = document.createElement('div');
+    normWrap.className = 'check';
+    normWrap.append(normLabel);
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    grid.append(start.wrap, end.wrap, fadeIn.wrap, fadeOut.wrap, normWrap);
+
+    const preview = Object.assign(document.createElement('audio'), { controls: true, hidden: true });
+    const edits = () => ({
+      start: Number(start.input.value) || 0,
+      end: Math.min(duration, Number(end.input.value) || duration),
+      fadeIn: Number(fadeIn.input.value) || 0,
+      fadeOut: Number(fadeOut.input.value) || 0,
+      normalize: normalize.checked,
+    });
+    const status = entryStatus(li);
+    const render = () => {
+      try {
+        status.clear();
+        return encodeWav(renderEdit(buffer, edits()));
+      } catch (err) {
+        status.error(err.message);
+        return null;
+      }
+    };
+    const editedName = () => `${file.filename.replace(/\.[^.]+$/, '')}_retouche.wav`;
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    actions.append(
+      button('▶ Écouter le résultat', () => {
+        const wav = render();
+        if (!wav) return;
+        preview.hidden = false;
+        preview.src = URL.createObjectURL(wav);
+        preview.play();
+      }),
+      button('⬇ Télécharger en WAV', () => {
+        const wav = render();
+        if (!wav) return;
+        const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(wav), download: editedName() });
+        a.click();
+      }),
+      button('💾 Ajouter à l\'historique', async (ev) => {
+        const wav = render();
+        if (!wav) return;
+        ev.target.disabled = true;
+        try {
+          status.set('Enregistrement dans output/…');
+          const saved = await jsonFetch('/api/output', {
+            method: 'POST',
+            headers: { 'x-filename': encodeURIComponent(editedName()) },
+            body: wav,
+          });
+          await addToHistory({ kind: 'edit', params: { name: file.filename, edits: edits() }, files: [{ kind: file.kind, filename: saved.filename }] });
+          status.set('Version retouchée ajoutée en haut de l\'historique.');
+        } catch (err) {
+          status.error(err.message);
+        } finally {
+          ev.target.disabled = false;
+        }
+      }),
+    );
+    panel.replaceChildren(grid, actions, preview);
+  }).catch((err) => {
+    panel.textContent = `Lecture impossible : ${err.message}`;
+  });
+}
+
+function renderFile(entry, file, li) {
+  const box = document.createElement('div');
+  box.className = 'file';
+  if (entry.files.length > 1) {
+    const label = document.createElement('div');
+    label.className = 'file__label';
+    label.textContent = FILE_LABELS[file.kind] ?? file.kind;
+    box.append(label);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.className = 'waveform';
+  canvas.title = 'Cliquez pour écouter à partir de cet endroit';
+  const player = document.createElement('audio');
+  player.controls = true;
+  player.preload = 'none';
+  player.src = file.url;
+  attachWaveform(canvas, player, file.url);
+
+  const actions = document.createElement('div');
+  actions.className = 'file-actions';
+  const link = document.createElement('a');
+  link.href = file.url;
+  link.download = file.filename;
+  link.textContent = '⬇ Télécharger';
+  link.title = `output/${file.filename}`;
+  actions.append(link, button('🔁 Faire une reprise', () => useAsCover(file).catch((err) => entryStatus(li).error(err.message))));
+  if (file.kind === 'mix' && entry.kind !== 'separation') {
+    actions.append(button('🎤 Changer la voix', () => revoice(entry, file, li)));
+  }
+  actions.append(button('✂️ Retoucher', () => toggleEditor(entry, file, box, li)));
+  box.append(canvas, player, actions);
+  return box;
 }
 
 function renderEntry(entry) {
@@ -582,58 +964,30 @@ function renderEntry(entry) {
   const metaEl = document.createElement('div');
   metaEl.className = 'meta';
   metaEl.textContent = [new Date(entry.createdAt).toLocaleString('fr-FR'), meta].filter(Boolean).join(' · ');
-  li.append(titleEl, metaEl);
+  li.append(titleEl, metaEl, ...entry.files.map((file) => renderFile(entry, file, li)));
 
-  for (const file of entry.files) {
-    const box = document.createElement('div');
-    box.className = 'file';
-    if (entry.files.length > 1) {
-      const label = document.createElement('div');
-      label.className = 'file__label';
-      label.textContent = FILE_LABELS[file.kind] ?? file.kind;
-      box.append(label);
-    }
-    const player = document.createElement('audio');
-    player.controls = true;
-    player.preload = 'none';
-    player.src = file.url;
-    const link = document.createElement('a');
-    link.href = file.url;
-    link.download = file.filename;
-    link.textContent = `Télécharger output/${file.filename}`;
-    box.append(player, link);
-    li.append(box);
-  }
-
+  const status = document.createElement('div');
+  status.className = 'entry-status';
+  status.hidden = true;
   const actions = document.createElement('div');
   actions.className = 'entry-actions';
   if (entry.kind === 'generation' && entry.params) {
-    const reuse = document.createElement('button');
-    reuse.type = 'button';
-    reuse.className = 'secondary';
-    reuse.textContent = 'Réutiliser ces réglages';
-    reuse.addEventListener('click', () => {
+    actions.append(button('Réutiliser ces réglages', () => {
       applyParams(entry.params);
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-    actions.append(reuse);
+    }));
   }
-  const del = document.createElement('button');
-  del.type = 'button';
-  del.className = 'secondary danger';
-  del.textContent = 'Supprimer';
-  del.addEventListener('click', async () => {
+  actions.append(button('Supprimer', async () => {
     if (!confirm(`Supprimer « ${title} » et ses fichiers ?`)) return;
     try {
       await jsonFetch(`/api/history/${encodeURIComponent(entry.id)}`, { method: 'DELETE' });
       li.remove();
       $('emptyResults').hidden = $('results').children.length > 0;
     } catch (err) {
-      alert(err.message);
+      entryStatus(li).error(err.message);
     }
-  });
-  actions.append(del);
-  li.append(actions);
+  }, 'secondary danger'));
+  li.append(status, actions);
   return li;
 }
 
@@ -657,6 +1011,22 @@ async function addToHistory(entry) {
   $('emptyResults').hidden = true;
 }
 
+// ---------- Notification de fin ----------
+
+function askNotificationPermission() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission().catch(() => {});
+  }
+}
+
+// Son à chaque fin ; notification système si l'onglet n'est pas affiché.
+function notifyDone(title, body) {
+  chime();
+  if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+    new Notification(title, { body });
+  }
+}
+
 // ---------- Génération ----------
 
 async function generate(ev) {
@@ -668,6 +1038,7 @@ async function generate(ev) {
     return;
   }
   const variants = Number($('variants').value) || 1;
+  askNotificationPermission();
   $('generate').disabled = true;
   $('interrupt').hidden = false;
   mainProgress.set('Envoi à ComfyUI…', 0);
@@ -705,9 +1076,11 @@ async function generate(ev) {
       });
     }
     mainProgress.hide();
+    notifyDone(variants > 1 ? `${variants} versions prêtes` : 'Morceau prêt', params.tags.slice(0, 80));
   } catch (err) {
     mainProgress.hide();
     showError(err.message);
+    notifyDone('Génération échouée', err.message);
     cancelPending();
   } finally {
     pendingPrompts.clear();
@@ -740,6 +1113,7 @@ async function separate() {
     showError('Choisissez le morceau à séparer.', 'separateError');
     return;
   }
+  askNotificationPermission();
   $('separate').disabled = true;
   separateProgress.set('Envoi du morceau à ComfyUI…', 0);
   const start = performance.now();
@@ -754,9 +1128,11 @@ async function separate() {
       files,
     });
     separateProgress.hide();
+    notifyDone('Séparation terminée', file.name);
   } catch (err) {
     separateProgress.hide();
     showError(err.message, 'separateError');
+    notifyDone('Séparation échouée', err.message);
   } finally {
     $('separate').disabled = !separationReady;
   }
@@ -766,6 +1142,7 @@ async function separate() {
 
 fillSelect($('keyscale'), FALLBACK_KEYS, 'C major');
 fillSelect($('language'), FALLBACK_LANGUAGES, 'en');
+initLyricsTools();
 initPresets();
 initBasicVoices();
 initVoices();
@@ -778,6 +1155,7 @@ $('randomSeed').addEventListener('click', () => {
 });
 $('interrupt').addEventListener('click', interrupt);
 $('separate').addEventListener('click', separate);
+$('surprise').addEventListener('click', surprise);
 
 connectWs();
 checkComfy();

@@ -69,7 +69,6 @@ export function applyVoiceTags(tags, voiceTags) {
 
 export function buildWorkflow(input) {
   const p = { ...DEFAULTS, ...input };
-  const mixSettings = { ...DEFAULTS.mix, ...p.mix };
   if (p.basic_voice) p.tags = applyVoiceTags(p.tags, p.basic_voice.tags);
   const wf = {
     '1': {
@@ -150,14 +149,30 @@ export function buildWorkflow(input) {
     }
   }
 
-  let mix = ['7', 0];
+  addPostProcessing(wf, ['7', 0], p);
+  return wf;
+}
+
+// Change la voix (et/ou le mixage) d'un morceau existant, sans régénérer la musique.
+// input : { audio: nom dans ComfyUI/input, voice, mix, stems }
+export function buildRevoiceWorkflow(input) {
+  const p = { ...DEFAULTS, ...input };
+  const wf = { '40': { class_type: 'LoadAudio', inputs: { audio: p.audio } } };
+  addPostProcessing(wf, ['40', 0], p);
+  return wf;
+}
+
+// À partir de `source` : séparation, voix clonée, volume de la voix, pistes séparées, EQ, puis enregistrement.
+function addPostProcessing(wf, source, p) {
+  const mixSettings = { ...DEFAULTS.mix, ...p.mix };
+  let mix = source;
   const remixVocals = Boolean(p.voice) || mixSettings.vocal_db !== 0;
   if (remixVocals || p.stems) {
-    wf['20'] = { class_type: SEPARATION_NODE, inputs: { audio: ['7', 0] } };
+    wf['20'] = { class_type: SEPARATION_NODE, inputs: { audio: source } };
     // Instrumental = mix - voix.
     wf['23'] = {
       class_type: 'AudioMerge',
-      inputs: { audio1: ['7', 0], audio2: ['20', VOCALS_OUTPUT], merge_method: 'subtract' },
+      inputs: { audio1: source, audio2: ['20', VOCALS_OUTPUT], merge_method: 'subtract' },
     };
     let vocals = ['20', VOCALS_OUTPUT];
     if (p.voice) {
@@ -213,7 +228,6 @@ export function buildWorkflow(input) {
   }
 
   wf[SAVE_NODE_ID] = saveMp3(mix);
-  return wf;
 }
 
 // Sépare un morceau importé en voix + instrumental (pas de génération).

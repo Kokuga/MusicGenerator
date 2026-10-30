@@ -47,11 +47,14 @@ Le serveur sert le site et relaie `/comfy/*` (HTTP + WebSocket) vers ComfyUI : i
 
 ## Utilisation
 
-1. Choisissez un **exemple** et cliquez sur « Charger l'exemple » (le lo-fi de 60 s est le plus rapide pour tester).
+1. Choisissez un **exemple** ou un de **vos presets** et cliquez sur « Charger » (le lo-fi de 60 s est le plus rapide pour tester).
+   « 💾 Enregistrer mes réglages » sauvegarde style, paroles, types de voix, voix clonée et mixage sous un nom (`data/presets.json`) ; le morceau importé pour une reprise n'est pas conservé.
 2. **Style / tags** : genre, instruments, voix, ambiance, production. En anglais de préférence, séparés par des virgules.
    ex. `french pop, upbeat, female vocals, acoustic guitar, punchy drums`
-3. **Paroles** : structurez avec `[Intro]`, `[Verse]`, `[Pre-Chorus]`, `[Chorus]`, `[Bridge]`, `[Outro]`.
+   **🎲 Surprends-moi** tire un style cohérent au hasard (genre, instruments, ambiance, production), avec BPM, tonalité, type de voix et seed assortis.
+3. **Paroles** : structurez avec `[Intro]`, `[Verse]`, `[Pre-Chorus]`, `[Chorus]`, `[Bridge]`, `[Outro]` (boutons au-dessus du champ pour les insérer).
    Pour un morceau sans voix : `[Instrumental]`.
+   Sous le champ : nombre de lignes et de syllabes (estimation) et durée de chant approximative au BPM choisi, avec une alerte si les paroles semblent trop longues pour la durée.
 4. **Langue** : celle des paroles (`fr`, `en`, …).
 5. **Durée, BPM, mesure, tonalité** : guident la structure musicale.
 6. **Seed** : même seed + mêmes réglages = même morceau. 🎲 pour en tirer un au hasard.
@@ -61,6 +64,14 @@ Le serveur sert le site et relaie `/comfy/*` (HTTP + WebSocket) vers ComfyUI : i
 ### Historique
 
 Chaque génération est enregistrée avec ses réglages dans `output/history.json` : la liste survit au rechargement de la page, avec « Réutiliser ces réglages » et « Supprimer » (efface aussi les fichiers). Les anciens MP3 de `output/` apparaissent aussi, sans réglages.
+
+Pour chaque fichier :
+- **forme d'onde** : cliquez dessus pour écouter à partir de cet endroit ;
+- **🔁 Faire une reprise** : charge le morceau comme source de reprise (bloc « Reprise d'un morceau ») ;
+- **🎤 Changer la voix** : rechante le morceau avec la voix clonée sélectionnée dans le bloc « Voix » (transposition, étapes et mixage compris), sans régénérer la musique. Le résultat est une nouvelle entrée ;
+- **✂️ Retoucher** : couper le début / la fin, fondus d'entrée et de sortie, normalisation (pic à −1 dB), dans le navigateur ; puis écouter, télécharger en WAV ou ajouter à l'historique.
+
+Un son est joué à la fin de chaque génération, séparation ou changement de voix, et une notification s'affiche si l'onglet est en arrière-plan (autorisation demandée au premier lancement).
 
 ### Mixage
 
@@ -107,13 +118,16 @@ Décocher « Codes audio LLM » accélère la génération au prix de la qualit�
 ## Structure
 
 ```
-server.js           serveur statique + proxy ComfyUI + copie des morceaux dans output/ + API des voix
+server.js           serveur statique + proxy ComfyUI + copie des morceaux dans output/ + API voix / historique / presets
 output/             morceaux générés + history.json (créé automatiquement)
 voices/             voix enregistrées + voices.json (créé automatiquement)
 public/index.html   page
-public/app.js       logique (envoi du prompt, progression WebSocket, résultats)
+public/app.js       logique (envoi du prompt, progression WebSocket, historique, presets)
+public/audio-tools.js  forme d'onde, retouches, export WAV, son de fin (Web Audio)
+public/lyrics.js    aide aux paroles (balises, syllabes, durée estimée)
 public/workflow.js  workflow ComfyUI au format API (d'après le template officiel « audio_ace_step_1_5_checkpoint »)
-public/presets.js   exemples
+public/presets.js   exemples, types de voix, générateur « Surprends-moi »
+data/presets.json   vos presets (créé au premier enregistrement)
 public/style.css    styles
 ```
 

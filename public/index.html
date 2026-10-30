@@ -29,20 +29,27 @@
 
     <section class="card">
       <div class="presets">
-        <label for="preset">Exemple</label>
-        <div class="row">
+        <label for="preset">Exemple / mes presets</label>
+        <div class="row wrap">
           <select id="preset"></select>
-          <button type="button" id="loadPreset" class="secondary">Charger l'exemple</button>
+          <button type="button" id="loadPreset" class="secondary">Charger</button>
+          <button type="button" id="deletePreset" class="secondary danger" hidden>Supprimer</button>
+          <button type="button" id="savePreset" class="secondary" title="Enregistre le style, les paroles, la voix et le mixage actuels">💾 Enregistrer mes réglages</button>
         </div>
         <p id="presetHint" class="hint"></p>
       </div>
 
       <form id="form">
-        <label for="tags">Style / tags</label>
+        <div class="label-row">
+          <label for="tags">Style / tags</label>
+          <button type="button" id="surprise" class="secondary small" title="Style, BPM, tonalité et type de voix aléatoires">🎲 Surprends-moi</button>
+        </div>
         <textarea id="tags" rows="3" required placeholder="ex : synthwave, retro 80s, male vocals, driving bass, nostalgic"></textarea>
 
         <label for="lyrics">Paroles</label>
+        <div id="lyricsTags" class="tag-buttons"></div>
         <textarea id="lyrics" rows="12" placeholder="[Verse]&#10;…&#10;&#10;[Chorus]&#10;…&#10;&#10;ou [Instrumental]"></textarea>
+        <p id="lyricsStats" class="hint"></p>
 
         <div class="grid">
           <div>

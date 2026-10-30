@@ -152,3 +152,24 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 button.danger { color: var(--err); border-color: var(--err); }
 .record { align-items: center; flex-wrap: wrap; }
 .record .hint { margin: 0; }
+.row.wrap { flex-wrap: wrap; }
+.row.wrap > select { min-width: 200px; }
+button.small { padding: 3px 10px; font-size: .85rem; }
+.label-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; }
+.tag-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.tag-buttons button { padding: 2px 10px; font-size: .8rem; font-weight: 500; }
+.hint.warn-inline { color: var(--warn); }
+
+.waveform { display: block; width: 100%; height: 48px; cursor: pointer; margin: 4px 0; }
+.file-actions { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-top: 4px; }
+.file-actions button { padding: 3px 10px; font-size: .85rem; }
+.entry-status { font-size: .85rem; color: var(--muted); margin-top: 6px; }
+.entry-status.err { color: var(--err); white-space: pre-wrap; }
+.editor {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.editor .grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+.editor .actions { margin-top: 10px; flex-wrap: wrap; }

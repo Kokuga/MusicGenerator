@@ -150,3 +150,37 @@ export const BASIC_VOICES = [
   { id: 'duet', name: 'Duo homme / femme', tags: 'male and female duet vocals, harmonies' },
   { id: 'choir', name: 'Chœur', tags: 'choir vocals, layered harmonies, epic' },
 ];
+
+// « Surprends-moi » : chaque genre a ses instruments, sa plage de BPM et des types de voix cohérents.
+const RANDOM_GENRES = [
+  { tags: 'french pop, catchy melody', instruments: ['acoustic guitar', 'bright synths', 'punchy drums', 'piano', 'claps'], bpm: [96, 124], minor: 0.3, voices: ['female-pop', 'male-tenor', 'duet'] },
+  { tags: 'synthwave, retro 80s', instruments: ['analog synths', 'driving bass', 'gated reverb drums', 'arpeggiator'], bpm: [90, 118], minor: 0.7, voices: ['male-tenor', 'female-soft'] },
+  { tags: 'lo-fi hip hop, chill', instruments: ['mellow Rhodes piano', 'vinyl crackle', 'boom-bap drums', 'upright bass'], bpm: [70, 90], minor: 0.5, voices: ['rap', 'whisper', 'female-soft'] },
+  { tags: 'indie folk, intimate', instruments: ['fingerpicked acoustic guitar', 'soft strings', 'harmonica', 'light percussion'], bpm: [72, 104], minor: 0.4, voices: ['male-deep', 'female-soft', 'duet'] },
+  { tags: 'rock, energetic', instruments: ['distorted electric guitars', 'live drums', 'bass guitar', 'organ'], bpm: [110, 150], minor: 0.5, voices: ['male-raspy', 'female-power'] },
+  { tags: 'soul, groovy', instruments: ['horn section', 'Hammond organ', 'funky bass', 'tight drums'], bpm: [80, 108], minor: 0.4, voices: ['female-power', 'male-tenor', 'choir'] },
+  { tags: 'french rap, urban', instruments: ['808 bass', 'trap hi-hats', 'dark piano', 'atmospheric pads'], bpm: [130, 150], minor: 0.8, voices: ['rap'] },
+  { tags: 'electro pop, dance', instruments: ['four-on-the-floor kick', 'sidechained synths', 'plucks', 'sub bass'], bpm: [118, 128], minor: 0.5, voices: ['female-pop', 'male-tenor'] },
+  { tags: 'jazz ballad, smoky club', instruments: ['brushed drums', 'upright bass', 'piano trio', 'muted trumpet'], bpm: [60, 84], minor: 0.5, voices: ['female-soft', 'male-deep', 'whisper'] },
+  { tags: 'reggae, sunny', instruments: ['offbeat guitar skank', 'deep bass', 'one-drop drums', 'organ bubble'], bpm: [70, 90], minor: 0.3, voices: ['male-tenor', 'duet'] },
+  { tags: 'cinematic pop, epic', instruments: ['soaring strings', 'big drums', 'piano', 'choir pads'], bpm: [84, 110], minor: 0.7, voices: ['female-power', 'choir', 'male-tenor'] },
+  { tags: 'bossa nova, relaxed', instruments: ['nylon guitar', 'soft shaker', 'warm bass', 'flute'], bpm: [110, 140], minor: 0.4, voices: ['whisper', 'female-soft', 'duet'] },
+];
+const RANDOM_MOODS = ['nostalgic', 'uplifting', 'melancholic', 'dreamy', 'euphoric', 'romantic', 'dark', 'hopeful', 'bittersweet', 'playful'];
+const RANDOM_PRODUCTION = ['warm analog mix', 'polished radio mix', 'lush reverb', 'intimate close-mic production', 'wide stereo mix'];
+const RANDOM_KEYS = ['C', 'D', 'Eb', 'E', 'F', 'G', 'A', 'Bb'];
+
+const pick = (list) => list[Math.floor(Math.random() * list.length)];
+const pickSome = (list, n) => [...list].sort(() => Math.random() - 0.5).slice(0, n);
+
+// Renvoie des réglages partiels : tags, bpm, keyscale, basic_voice.
+export function randomStyle() {
+  const genre = pick(RANDOM_GENRES);
+  const voiceId = pick(genre.voices);
+  return {
+    tags: [genre.tags, ...pickSome(genre.instruments, 3), pick(RANDOM_MOODS), pick(RANDOM_PRODUCTION)].join(', '),
+    bpm: genre.bpm[0] + Math.floor(Math.random() * (genre.bpm[1] - genre.bpm[0] + 1)),
+    keyscale: `${pick(RANDOM_KEYS)} ${Math.random() < genre.minor ? 'minor' : 'major'}`,
+    basic_voice: BASIC_VOICES.find((v) => v.id === voiceId),
+  };
+}

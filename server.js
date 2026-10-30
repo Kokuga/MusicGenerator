@@ -12,11 +12,13 @@ const OUTPUT_DIR = path.join(__dirname, 'output');
 const VOICES_DIR = path.join(__dirname, 'voices');
 const VOICES_INDEX = path.join(VOICES_DIR, 'voices.json');
 const HISTORY_FILE = path.join(OUTPUT_DIR, 'history.json');
+const PRESETS_FILE = path.join(__dirname, 'data', 'presets.json');
 const PREFIX = '/comfy';
 const OUTPUT_PREFIX = '/output/';
 const VOICES_PREFIX = '/voices/';
 const COMFY_SUBFOLDER = 'musiquegenerator';
 const MAX_VOICE_BYTES = 20 * 1024 * 1024;
+const MAX_OUTPUT_BYTES = 300 * 1024 * 1024; // WAV retouché : ~10 Mo par minute en stéréo
 const AUDIO_EXTS = ['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.webm'];
 
 const MIME = {
@@ -105,6 +107,31 @@ function timestamp() {
     `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
 }
 
+// Fichier JSON (tableau) dont les écritures sont sérialisées pour ne rien perdre si deux requêtes arrivent ensemble.
+function createStore(filePath) {
+  let lock = Promise.resolve();
+  async function read() {
+    try {
+      return JSON.parse(await fs.promises.readFile(filePath, 'utf8'));
+    } catch {
+      return [];
+    }
+  }
+  function update(change) {
+    const run = lock.then(async () => {
+      const next = change(await read());
+      await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.promises.writeFile(filePath, JSON.stringify(next, null, 2));
+    });
+    lock = run.catch(() => {});
+    return run;
+  }
+  return { read, update };
+}
+
+const historyStore = createStore(HISTORY_FILE);
+const presetsStore = createStore(PRESETS_FILE);
+
 // Copie un fichier produit par ComfyUI dans output/ du projet et renvoie son URL locale.
 async function saveOutput(req, res) {
   try {
@@ -121,6 +148,48 @@ async function saveOutput(req, res) {
     sendJson(res, 200, { filename: name, url: OUTPUT_PREFIX + encodeURIComponent(name) });
   } catch (err) {
     sendJson(res, 500, { error: `Enregistrement impossible : ${err.message}` });
+  }
+}
+
+// Reçoit un fichier audio brut (en-tête x-filename) et l'enregistre dans output/.
+async function uploadOutput(req, res) {
+  try {
+    const original = path.basename(decodeURIComponent(req.headers['x-filename'] || ''));
+    if (!AUDIO_EXTS.includes(path.extname(original).toLowerCase())) {
+      return sendJson(res, 400, { error: `Format non supporté (${AUDIO_EXTS.join(', ')})` });
+    }
+    const data = await readBuffer(req, MAX_OUTPUT_BYTES);
+    if (!data.length) return sendJson(res, 400, { error: 'Fichier vide' });
+    const name = `${timestamp()}_${original}`;
+    await fs.promises.mkdir(OUTPUT_DIR, { recursive: true });
+    await fs.promises.writeFile(path.join(OUTPUT_DIR, name), data);
+    sendJson(res, 200, { filename: name, url: OUTPUT_PREFIX + encodeURIComponent(name) });
+  } catch (err) {
+    sendJson(res, 400, { error: `Enregistrement impossible : ${err.message}` });
+  }
+}
+
+// ---------- Presets personnels (data/presets.json) ----------
+// Entrée : { id, name, params, createdAt }.
+
+async function routePresets(req, res) {
+  const id = decodeURIComponent(req.url.split('?')[0].split('/')[3] || ''); // /api/presets/<id>
+  try {
+    if (!id && req.method === 'GET') return sendJson(res, 200, await presetsStore.read());
+    if (!id && req.method === 'POST') {
+      const { name, params } = JSON.parse(await readBody(req));
+      if (!String(name || '').trim() || !params) return sendJson(res, 400, { error: 'Nom ou réglages manquants' });
+      const preset = { id: crypto.randomUUID().slice(0, 8), name: String(name).trim(), params, createdAt: new Date().toISOString() };
+      await presetsStore.update((list) => [...list, preset]);
+      return sendJson(res, 200, preset);
+    }
+    if (id && req.method === 'DELETE') {
+      await presetsStore.update((list) => list.filter((p) => p.id !== id));
+      return sendJson(res, 200, { ok: true });
+    }
+    sendJson(res, 404, { error: 'Route inconnue' });
+  } catch (err) {
+    sendJson(res, 400, { error: `Presets : ${err.message}` });
   }
 }
 
@@ -211,27 +280,7 @@ function routeVoices(req, res) {
 }
 
 // ---------- Historique (output/history.json) ----------
-// Entrée : { id, createdAt, kind: 'generation' | 'separation', params, seconds, files: [{ kind, filename }] }.
-
-async function readHistory() {
-  try {
-    return JSON.parse(await fs.promises.readFile(HISTORY_FILE, 'utf8'));
-  } catch {
-    return [];
-  }
-}
-
-// Les écritures sont sérialisées pour ne pas perdre d'entrée si deux requêtes arrivent ensemble.
-let historyLock = Promise.resolve();
-function updateHistory(change) {
-  const run = historyLock.then(async () => {
-    const next = change(await readHistory());
-    await fs.promises.mkdir(OUTPUT_DIR, { recursive: true });
-    await fs.promises.writeFile(HISTORY_FILE, JSON.stringify(next, null, 2));
-  });
-  historyLock = run.catch(() => {});
-  return run;
-}
+// Entrée : { id, createdAt, kind: 'generation' | 'separation' | 'revoice' | 'edit', params, seconds, files: [{ kind, filename }] }.
 
 function fileView(f) {
   return { ...f, url: OUTPUT_PREFIX + encodeURIComponent(f.filename) };
@@ -239,7 +288,7 @@ function fileView(f) {
 
 // Historique + anciens MP3 de output/ qui n'y figurent pas (générés avant l'historique).
 async function listHistory(req, res) {
-  const history = await readHistory();
+  const history = await historyStore.read();
   const known = new Set(history.flatMap((e) => e.files.map((f) => f.filename)));
   let names = [];
   try {
@@ -272,7 +321,7 @@ async function addHistory(req, res) {
       seconds,
       files: files.map((f) => ({ kind: String(f.kind), filename: path.basename(String(f.filename)) })),
     };
-    await updateHistory((h) => [...h, entry]);
+    await historyStore.update((h) => [...h, entry]);
     sendJson(res, 200, { ...entry, files: entry.files.map(fileView) });
   } catch (err) {
     sendJson(res, 400, { error: `Historique : ${err.message}` });
@@ -285,9 +334,9 @@ async function deleteHistory(req, res, id) {
   if (id.startsWith('file:')) {
     files = [{ filename: path.basename(id.slice(5)) }];
   } else {
-    files = (await readHistory()).find((e) => e.id === id)?.files;
+    files = (await historyStore.read()).find((e) => e.id === id)?.files;
     if (!files) return sendJson(res, 404, { error: 'Entrée introuvable' });
-    await updateHistory((h) => h.filter((e) => e.id !== id));
+    await historyStore.update((h) => h.filter((e) => e.id !== id));
   }
   await Promise.all(files.map((f) => fs.promises.rm(path.join(OUTPUT_DIR, path.basename(f.filename)), { force: true })));
   sendJson(res, 200, { ok: true });
@@ -326,6 +375,10 @@ const server = http.createServer((req, res) => {
     proxyHttp(req, res);
   } else if (req.method === 'POST' && req.url === '/api/save') {
     saveOutput(req, res);
+  } else if (req.method === 'POST' && req.url === '/api/output') {
+    uploadOutput(req, res);
+  } else if (req.url === '/api/presets' || req.url.startsWith('/api/presets/')) {
+    routePresets(req, res);
   } else if (req.url === '/api/history' || req.url.startsWith('/api/history/')) {
     routeHistory(req, res);
   } else if (req.url === '/api/voices' || req.url.startsWith('/api/voices/')) {
