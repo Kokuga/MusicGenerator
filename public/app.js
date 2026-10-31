@@ -454,6 +454,35 @@ async function detectCoverBpm(file) {
   }
 }
 
+// Télécharge l'audio d'une vidéo YouTube via le serveur (yt-dlp) et l'utilise comme morceau de reprise.
+async function importCoverFromYoutube() {
+  const url = $('coverYoutube').value.trim();
+  const status = $('coverYoutubeStatus');
+  const button = $('coverYoutubeLoad');
+  if (!url) return;
+  status.hidden = false;
+  status.classList.remove('warn');
+  status.textContent = 'Téléchargement depuis YouTube…';
+  button.disabled = true;
+  try {
+    const res = await fetch('/api/youtube', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `HTTP ${res.status}`);
+    const name = decodeURIComponent(res.headers.get('x-filename') || 'youtube.m4a');
+    const blob = await res.blob();
+    setCoverFile(new File([blob], name, { type: blob.type }));
+    status.textContent = `Importé : ${name}`;
+  } catch (err) {
+    status.classList.add('warn');
+    status.textContent = err.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function initCover() {
   $('cover_enabled').addEventListener('change', () => {
     $('coverOptions').hidden = !$('cover_enabled').checked;
@@ -465,6 +494,13 @@ function initCover() {
     if (!file) return;
     $('coverPreview').src = URL.createObjectURL(file);
     detectCoverBpm(file);
+  });
+  $('coverYoutubeLoad').addEventListener('click', importCoverFromYoutube);
+  $('coverYoutube').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      importCoverFromYoutube();
+    }
   });
   $('coverPreview').addEventListener('loadedmetadata', syncCoverDuration);
   $('cover_use_duration').addEventListener('change', syncCoverDuration);
@@ -774,7 +810,10 @@ function attachWaveform(canvas, player, url) {
 // ---------- Actions sur un fichier ----------
 
 async function useAsCover(file) {
-  const f = await fileFromUrl(file.url, file.filename);
+  setCoverFile(await fileFromUrl(file.url, file.filename));
+}
+
+function setCoverFile(f) {
   const transfer = new DataTransfer();
   transfer.items.add(f);
   $('coverFile').files = transfer.files;

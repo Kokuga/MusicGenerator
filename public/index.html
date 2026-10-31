@@ -155,6 +155,12 @@
             <p class="hint">Le morceau généré suivra la structure, la mélodie et l'instrumental du morceau importé, avec vos tags et paroles.</p>
             <label for="coverFile">Morceau</label>
             <input id="coverFile" type="file" accept="audio/*">
+            <p class="hint">ou depuis un lien YouTube (10 min max, nécessite yt-dlp) :</p>
+            <div class="row">
+              <input id="coverYoutube" type="url" placeholder="https://www.youtube.com/watch?v=…">
+              <button type="button" id="coverYoutubeLoad" class="secondary">Importer</button>
+            </div>
+            <p id="coverYoutubeStatus" class="hint" hidden></p>
             <audio id="coverPreview" controls hidden></audio>
             <p id="coverBpm" class="hint" hidden></p>
             <div class="check">

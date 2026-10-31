@@ -2,6 +2,8 @@
 const http = require('http');
 const crypto = require('crypto');
 const net = require('net');
+const os = require('os');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -20,6 +22,10 @@ const COMFY_SUBFOLDER = 'musiquegenerator';
 const MAX_VOICE_BYTES = 20 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 300 * 1024 * 1024; // WAV retouché : ~10 Mo par minute en stéréo
 const AUDIO_EXTS = ['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.webm'];
+const YTDLP = process.env.YTDLP || 'yt-dlp';
+const YOUTUBE_HOSTS = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'];
+const YOUTUBE_MAX_SECONDS = 10 * 60;
+const YOUTUBE_TIMEOUT_MS = 5 * 60 * 1000;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -166,6 +172,88 @@ async function uploadOutput(req, res) {
     sendJson(res, 200, { filename: name, url: OUTPUT_PREFIX + encodeURIComponent(name) });
   } catch (err) {
     sendJson(res, 400, { error: `Enregistrement impossible : ${err.message}` });
+  }
+}
+
+// ---------- Import YouTube (yt-dlp) ----------
+// Télécharge la piste audio telle quelle (m4a de préférence) : pas besoin de ffmpeg.
+
+// Un terminal ouvert avant l'installation garde l'ancien PATH : on cherche aussi dans le dossier de winget.
+function findYtDlp() {
+  if (process.env.YTDLP || process.platform !== 'win32' || !process.env.LOCALAPPDATA) return YTDLP;
+  const packages = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Packages');
+  try {
+    const dir = fs.readdirSync(packages).find((d) => d.startsWith('yt-dlp.yt-dlp_'));
+    const exe = dir && path.join(packages, dir, 'yt-dlp.exe');
+    if (exe && fs.existsSync(exe)) return exe;
+  } catch {}
+  return YTDLP;
+}
+
+function runYtDlp(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(findYtDlp(), args, { windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => child.kill(), YOUTUBE_TIMEOUT_MS);
+    child.stdout.on('data', (chunk) => (stdout += chunk));
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err.code === 'ENOENT'
+        ? new Error('yt-dlp introuvable : installez-le (winget install yt-dlp) puis redémarrez le serveur')
+        : err);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) return resolve(stdout);
+      const lines = stderr.trim().split(/\r?\n/);
+      const line = lines.reverse().find((l) => l.includes('ERROR')) || lines[0];
+      reject(new Error(line || (code === null ? 'délai dépassé' : `yt-dlp a échoué (code ${code})`)));
+    });
+  });
+}
+
+async function importYoutube(req, res) {
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'musiquegenerator-yt-'));
+  try {
+    const { url } = JSON.parse(await readBody(req));
+    let parsed;
+    try {
+      parsed = new URL(String(url).trim());
+    } catch {
+      return sendJson(res, 400, { error: 'Lien invalide' });
+    }
+    if (!/^https?:$/.test(parsed.protocol) || !YOUTUBE_HOSTS.includes(parsed.hostname)) {
+      return sendJson(res, 400, { error: 'Seuls les liens YouTube sont acceptés' });
+    }
+    const out = await runYtDlp([
+      '--no-playlist', '--no-progress', '--restrict-filenames',
+      '-f', 'bestaudio[ext=m4a]/bestaudio',
+      '--match-filter', `duration <= ${YOUTUBE_MAX_SECONDS}`,
+      '--max-filesize', '100M',
+      '-o', path.join(dir, '%(title).80B.%(ext)s'),
+      '--print', 'after_move:filepath',
+      '--', parsed.href,
+    ]);
+    const file = out.trim().split(/\r?\n/).pop();
+    if (!file) {
+      return sendJson(res, 400, { error: `Vidéo ignorée : plus de ${YOUTUBE_MAX_SECONDS / 60} minutes (ou durée inconnue)` });
+    }
+    const name = path.basename(file);
+    if (!AUDIO_EXTS.includes(path.extname(name).toLowerCase())) {
+      return sendJson(res, 400, { error: `Format audio non supporté : ${path.extname(name)}` });
+    }
+    const data = await fs.promises.readFile(path.join(dir, name));
+    res.writeHead(200, {
+      'content-type': MIME[path.extname(name).toLowerCase()] || 'application/octet-stream',
+      'x-filename': encodeURIComponent(name),
+    });
+    res.end(data);
+  } catch (err) {
+    sendJson(res, 502, { error: `Import YouTube impossible : ${err.message}` });
+  } finally {
+    fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -377,6 +465,8 @@ const server = http.createServer((req, res) => {
     saveOutput(req, res);
   } else if (req.method === 'POST' && req.url === '/api/output') {
     uploadOutput(req, res);
+  } else if (req.method === 'POST' && req.url === '/api/youtube') {
+    importYoutube(req, res);
   } else if (req.url === '/api/presets' || req.url.startsWith('/api/presets/')) {
     routePresets(req, res);
   } else if (req.url === '/api/history' || req.url.startsWith('/api/history/')) {
